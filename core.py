@@ -1,6 +1,5 @@
-# core.py — 环境初始化, 日志配置, 全局常量/Tier定义, sqlglot AST复杂度评分,
-#            SQL与NLQ解析, 骨架/表名提取, SQL沙箱执行, LLM Prompt模板
-
+# core.py — environment initialization, logging configuration, global constants/Tier definitions, sqlglot AST complexity scoring,
+#            SQL and NLQ parsing, skeleton/table name extraction, SQL sandbox execution, LLM prompt templates
 import os, re, time, logging, sqlite3, threading, sys
 import psutil
 import sqlglot
