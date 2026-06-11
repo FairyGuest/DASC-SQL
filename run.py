@@ -1,4 +1,4 @@
-# run.py — 主入口, 线程池调度, 进度条, 组件分布统计报告
+# run.py — main entry, thread pool scheduling, progress bar, component distribution statistics report
 
 import os, sys
 import psutil
