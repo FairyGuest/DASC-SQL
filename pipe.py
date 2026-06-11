@@ -1,5 +1,5 @@
-# pipe.py — DashScope LLM调用路由(流式/超时),
-#            Worker流水线(合成→执行验证→多样性检测→共识投票→反向编译→保存)
+# pipe.py — DashScope LLM invocation routing (streaming/timeout),
+#            Worker pipeline (synthesis → execution validation → diversity detection → consensus voting → reverse compilation → saving)
 
 import os, random, time, torch
 from concurrent.futures import ThreadPoolExecutor, as_completed
