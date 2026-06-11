@@ -1,5 +1,5 @@
-# state.py — Spider Schema加载与格式化, JSON读写,
-#             SharedState共享状态管理(多样性检测, Tier管理, 嵌入缓存, 数据持久化)
+# state.py — Spider Schema loading and formatting, JSON reading/writing,
+#             SharedState shared state management (diversity detection, Tier management, embedding cache, data persistence)
 
 import os, random, json, math, threading
 import torch
