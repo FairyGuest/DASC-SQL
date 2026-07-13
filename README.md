@@ -2,4 +2,4 @@
 
 ### Run
 1. Set the `DASHSCOPE_API_KEY` in the `.env` file.
-2. Run `python run.py`.
+2. Run `python run.py bird` for BIRD,  `python run.py spider` for Spider.
