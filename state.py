@@ -6,7 +6,7 @@ import torch
 from collections import defaultdict
 from sentence_transformers import SentenceTransformer, util
 from modelscope import snapshot_download
-from core import CK, RK, CG, TR, DR, LG, cc, ex_sk, ex_tb
+from core import CK, CG, DR, LG, cc, ex_sk, ex_tb
 
 
 def lj(fp):
@@ -62,29 +62,30 @@ def csm(tjp, drp):
             at = os.path.join(drp, f"{di}.sqlite")
             if os.path.exists(at): dfp = at
             else: LG.warning(f"DB not found for '{di}' at '{dfp}', skipping"); continue
-        mp[di] = {'formatted_schema': _fmt_sch(si), 'db_file_path': dfp,
-                   'schema_item_details': si}
+        mp[di] = {'formatted_schema': _fmt_sch(si), 'db_file_path': dfp, 'schema_item_details': si}
     return mp
 
 
 class Ss:
-    def __init__(self, asds, smp, pbs):
+    def __init__(self, asds, smp, pbs, cfg):
         self.lk = threading.RLock()
         self.smp = smp
         self.pbs = pbs
         self._dids = list(smp.keys())
-        self.dt = {t: [] for t in TR}
-        self.cev = {t: threading.Event() for t in TR}
-        self.dbc = {t: defaultdict(int) for t in TR}
-        self.qta = {t: max(1, math.ceil(TR[t]['target'] / max(1, len(smp)))) for t in TR}
-        self.efd = {t: [] for t in TR}
-        self.dfd = {t: [] for t in TR}
+        self.tr = cfg.TR
+        self.tier_targets = cfg.COMP_TARGETS
+        self.dt = {t: [] for t in self.tr}
+        self.cev = {t: threading.Event() for t in self.tr}
+        self.dbc = {t: defaultdict(int) for t in self.tr}
+        self.qta = {t: max(1, math.ceil(self.tr[t]['target'] / max(1, len(smp)))) for t in self.tr}
+        self.efd = {t: [] for t in self.tr}
+        self.dfd = {t: [] for t in self.tr}
         self.ssk = set()
         self.gem = None
         self._mc = 20000
-        self.cpc = {t: {k: 0 for k in CK} for t in TR}
-        self.tcp = {t: 0 for t in TR}
-        self.tbu = {t: defaultdict(lambda: defaultdict(int)) for t in TR}
+        self.cpc = {t: {k: 0 for k in CK} for t in self.tr}
+        self.tcp = {t: 0 for t in self.tr}
+        self.tbu = {t: defaultdict(lambda: defaultdict(int)) for t in self.tr}
 
         LG.info("Loading embedding model...")
         print("[STARTUP] Loading embedding model...")
@@ -98,16 +99,17 @@ class Ss:
         self.sds = []
         nc = 0
         for s in asds:
-            sq = s.get('query', '')
+            sq = s.get(cfg.seed_field, '')
             if not sq: continue
             sc, bd = cc(sq); nc += 1
             if sc < 0: continue
             s['_comp'] = sc; s['_bd'] = bd
-            if sc <= 2: self.sds.append(s)
-        LG.info("Seeds computed: %d total │ eligible=%d", nc, len(self.sds))
+            simple_threshold = self.tr[list(self.tr.keys())[0]]['range'][0] - 1
+            if sc <= simple_threshold: self.sds.append(s)
+        LG.info("Seeds computed: %d total | eligible=%d", nc, len(self.sds))
         print(f"[STARTUP] Seeds: total={nc}, eligible={len(self.sds)}")
 
-        for tn, tc in TR.items():
+        for tn, tc in self.tr.items():
             op = os.path.join(DR, tc['output'])
             if os.path.exists(op):
                 try:
@@ -134,18 +136,17 @@ class Ss:
         for s in asds:
             q = s.get('question', '')
             if q and len(q) > 5: _nq.append(q)
-        for tn in TR:
+        for tn in self.tr:
             for it in self.dt[tn]:
                 q = it.get('question', '')
                 if q and len(q) > 5: _nq.append(q)
         if _nq:
             LG.info("Batch-encoding %d NLQs for diversity...", len(_nq))
             print(f"[STARTUP] Encoding {len(_nq)} NLQs for diversity...")
-            self.gem = self.emm.encode(_nq, convert_to_tensor=True,
-                                       batch_size=128, show_progress_bar=True)
+            self.gem = self.emm.encode(_nq, convert_to_tensor=True, batch_size=128, show_progress_bar=True)
             LG.info("NLQ embeddings ready: %d vectors", self.gem.shape[0])
             print(f"[STARTUP] NLQ embeddings: {self.gem.shape[0]} vectors")
-        for t in TR: LG.info("%s: %d/%d", t, len(self.dt[t]), TR[t]['target'])
+        for t in self.tr: LG.info("%s: %d/%d", t, len(self.dt[t]), self.tr[t]['target'])
 
     def _aem(self, em):
         if self.gem is None: self.gem = em.unsqueeze(0)
@@ -154,18 +155,17 @@ class Ss:
             if self.gem.shape[0] > self._mc: self.gem = self.gem[-self._mc:]
 
     def itc(self, tr):
-        with self.lk: return len(self.dt[tr]) >= TR[tr]['target']
+        with self.lk: return len(self.dt[tr]) >= self.tr[tr]['target']
 
     def azc(self):
-        with self.lk: return all(len(self.dt[t]) >= TR[t]['target'] for t in TR)
+        with self.lk: return all(len(self.dt[t]) >= self.tr[t]['target'] for t in self.tr)
 
     def ccn(self, tr):
         with self.lk: return len(self.dt[tr])
 
     def pkt(self):
         with self.lk:
-            cd = [(t, TR[t]['target'] - len(self.dt[t])) for t in TR
-                  if TR[t]['target'] - len(self.dt[t]) > 0]
+            cd = [(t, self.tr[t]['target'] - len(self.dt[t])) for t in self.tr if self.tr[t]['target'] - len(self.dt[t]) > 0]
             if not cd: return None
             tl = sum(r for _, r in cd)
             rv = random.random() * tl; cm = 0
@@ -175,18 +175,20 @@ class Ss:
             return cd[-1][0]
 
     def cls(self, sc):
-        return [t for t, cf in TR.items() if cf['range'][0] <= sc <= cf['range'][1]]
+        return [t for t, cf in self.tr.items() if cf['range'][0] <= sc <= cf['range'][1]]
 
     def ggd(self, tr):
-        t3 = random.sample(RK, 3)
-        gs = "\n".join(f"{i}. **{k}**: {CG.get(k, k)}" for i, k in enumerate(t3, 1))
+        tgt = self.tier_targets[tr]
         with self.lk:
-            pl = self.sds
-            rv = [s for s in pl if any(s.get('_bd', {}).get(k, 0) > 0 for k in t3)]
-            if len(rv) < 2: rv = pl
+            tc = max(1, self.tcp[tr]); eps = 1e-6
+            pl = sorted([(k, tgt.get(k, 0) / (self.cpc[tr][k] / tc + eps)) for k in CK if k != 'E_TOP'],
+                        key=lambda x: x[1], reverse=True)
+            t3 = [k for k, _ in pl[:3]]
+            gs = "\n".join(f"{i}. **{k}** (priority weight {v:.1f}x): {CG.get(k, k)}" for i, (k, v) in enumerate(pl[:3], 1))
+            rv = [s for s in self.sds if any(s.get('_bd', {}).get(k, 0) > 0 for k in t3)]
+            if len(rv) < 2: rv = self.sds
             sp = random.sample(rv, min(2, len(rv))) if rv else []
-            fs = "\n\n".join(f"Q: {s.get('question', 'N/A')}\nSQL: {s.get('query', '')}"
-                             for s in sp) if sp else "(No examples available)"
+            fs = "\n\n".join(f"Q: {s.get('question', 'N/A')}\nSQL: {s.get('SQL', s.get('query', ''))}" for s in sp) if sp else "(No examples available)"
         return gs, fs, t3
 
     def gut(self, tr, di):
@@ -213,47 +215,41 @@ class Ss:
 
     def sef(self, tr, di, qu, sq, sc, bd):
         with self.lk:
-            self.efd[tr].append({"db_id": di, "question": qu, "SQL": sq,
-                                 "complexity": sc, "breakdown": bd})
-            lo, hi = TR[tr]['range']
-            op = os.path.join(DR, f"aug_v8_spider_{lo}_{hi}_exec_fail.json")
+            self.efd[tr].append({"db_id": di, "question": qu, "SQL": sq, "complexity": sc, "breakdown": bd})
+            lo, hi = self.tr[tr]['range']
+            op = os.path.join(DR, f"aug_v8_{lo}_{hi}_exec_fail.json")
             tp = op + ".tmp"
             try:
-                with open(tp, 'w', encoding='utf-8') as f:
-                    json.dump(self.efd[tr], f, indent=2, ensure_ascii=False)
+                with open(tp, 'w', encoding='utf-8') as f: json.dump(self.efd[tr], f, indent=2, ensure_ascii=False)
                 os.replace(tp, op)
             except Exception as e: LG.error("sef failed: %s", e)
 
     def sdf(self, tr, di, qu, sq, sc, bd):
         with self.lk:
-            self.dfd[tr].append({"db_id": di, "question": qu, "SQL": sq,
-                                 "complexity": sc, "breakdown": bd})
-            lo, hi = TR[tr]['range']
-            op = os.path.join(DR, f"aug_v8_spider_{lo}_{hi}_diversity_fail.json")
+            self.dfd[tr].append({"db_id": di, "question": qu, "SQL": sq, "complexity": sc, "breakdown": bd})
+            lo, hi = self.tr[tr]['range']
+            op = os.path.join(DR, f"aug_v8_{lo}_{hi}_diversity_fail.json")
             tp = op + ".tmp"
             try:
-                with open(tp, 'w', encoding='utf-8') as f:
-                    json.dump(self.dfd[tr], f, indent=2, ensure_ascii=False)
+                with open(tp, 'w', encoding='utf-8') as f: json.dump(self.dfd[tr], f, indent=2, ensure_ascii=False)
                 os.replace(tp, op)
             except Exception as e: LG.error("sdf failed: %s", e)
 
     def svr(self, tr, di, qu, sq, sc, bd, em, sk):
         with self.lk:
-            if len(self.dt[tr]) >= TR[tr]['target']: return False
-            self.dt[tr].append({"db_id": di, "question": qu, "SQL": sq,
-                                "complexity": sc, "breakdown": bd})
+            if len(self.dt[tr]) >= self.tr[tr]['target']: return False
+            self.dt[tr].append({"db_id": di, "question": qu, "SQL": sq, "complexity": sc, "breakdown": bd})
             self.ssk.add(sk); self.dbc[tr][di] += 1
             for k in CK: self.cpc[tr][k] += bd.get(k, 0)
             self.tcp[tr] += sum(bd.get(k, 0) for k in CK)
             for tb in ex_tb(sq): self.tbu[tr][di][tb] += 1
             self._aem(em)
-            op = os.path.join(DR, TR[tr]['output']); tp = op + ".tmp"
+            op = os.path.join(DR, self.tr[tr]['output']); tp = op + ".tmp"
             try:
-                with open(tp, 'w', encoding='utf-8') as f:
-                    json.dump(self.dt[tr], f, indent=2, ensure_ascii=False)
+                with open(tp, 'w', encoding='utf-8') as f: json.dump(self.dt[tr], f, indent=2, ensure_ascii=False)
                 os.replace(tp, op)
             except Exception as e: LG.error("Save failed: %s", e); return False
             cn = len(self.dt[tr]); self.pbs[tr].update(1)
-            LG.info("SAVED [%s/%s] comp=%d  %d/%d", tr, di, sc, cn, TR[tr]['target'])
-            if cn >= TR[tr]['target']: self.cev[tr].set()
+            LG.info("SAVED [%s/%s] comp=%d  %d/%d", tr, di, sc, cn, self.tr[tr]['target'])
+            if cn >= self.tr[tr]['target']: self.cev[tr].set()
             return True
