@@ -11,20 +11,19 @@ load_dotenv()
 
 RT = os.path.dirname(os.path.abspath(__file__))
 DR = os.path.join(RT, "augmented_data")
-os.makedirs(os.path.join(RT, "logs"), exist_ok=True)
+LG_DIR = os.path.join(RT, "logs")
+os.makedirs(LG_DIR, exist_ok=True)
 os.makedirs(DR, exist_ok=True)
 
 _ts = time.strftime('%m%d_%H%M')
-LP = os.path.join(RT, "logs", f"aug_v8_spider_{_ts}.log")
+LP = os.path.join(LG_DIR, f"aug_v8_{_ts}.log")
 
-LG = logging.getLogger("AugV8Spider")
+LG = logging.getLogger("AugV8")
 LG.setLevel(logging.DEBUG)
 LG.propagate = False
 if LG.hasHandlers():
     LG.handlers.clear()
-_fmt = logging.Formatter(
-    '%(asctime)s │ %(levelname)-5s │ %(threadName)-14s │ %(message)s',
-    datefmt='%H:%M:%S')
+_fmt = logging.Formatter('%(asctime)s | %(levelname)-5s | %(threadName)-14s | %(message)s', datefmt='%H:%M:%S')
 _fh = logging.FileHandler(LP, encoding='utf-8')
 _fh.setLevel(logging.DEBUG); _fh.setFormatter(_fmt)
 LG.addHandler(_fh)
@@ -34,10 +33,8 @@ _ch.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(message)s'))
 LG.addHandler(_ch)
 for _n in ("httpx", "openai", "anthropic"):
     logging.getLogger(_n).setLevel(logging.WARNING)
-print(f"[STARTUP] Log → {LP}")
-LG.info("═" * 70)
-LG.info("V8 Spider Augmentation Pipeline ── Session Start")
-LG.info("═" * 70)
+print(f"[STARTUP] Log -> {LP}")
+LG.info("Session Start")
 
 SM = threading.Semaphore(25)
 ML = 50
@@ -71,14 +68,6 @@ CG = {
     'H_DISTINCT':   "use SELECT DISTINCT to eliminate duplicates",
 }
 
-TR = {
-    "moderate_low":  {"range": (3, 4), "seed_max": 2, "target": 500,
-                      "output": "aug_v8_spider_moderate_3_4.json"},
-    "moderate_high": {"range": (5, 7), "seed_max": 2, "target": 180,
-                      "output": "aug_v8_spider_moderate_5_7.json"},
-}
-
-# ── AST复杂度 ──
 
 class _Vx:
     def __init__(self, dp=0):
@@ -103,11 +92,11 @@ class _Vx:
     def tot(self): return sum(self.c.values())
 
     def _sc(self, n):
-        if isinstance(n, exp.Join):        self.c['A_JOIN'] += 1
-        if isinstance(n, exp.Func):        self.c['B_Function'] += 1
-        if isinstance(n, (exp.And, exp.Or, exp.Not)):                   self.c['B_Logic'] += 1
-        if isinstance(n, (exp.Add, exp.Sub, exp.Mul, exp.Div, exp.Mod)):self.c['B_Arithmetic'] += 1
-        if isinstance(n, exp.Case):        self.c['B_CASE'] += 1
+        if isinstance(n, exp.Join):           self.c['A_JOIN'] += 1
+        if isinstance(n, exp.Func):           self.c['B_Function'] += 1
+        if isinstance(n, (exp.And, exp.Or, exp.Not)):                     self.c['B_Logic'] += 1
+        if isinstance(n, (exp.Add, exp.Sub, exp.Mul, exp.Div, exp.Mod)): self.c['B_Arithmetic'] += 1
+        if isinstance(n, exp.Case):           self.c['B_CASE'] += 1
         if isinstance(n, (exp.In, exp.Between, exp.Like, exp.Exists, exp.Is)):
             self.c['B_Predicate'] += 1
             if isinstance(n, exp.Like) and n.args.get('escape') is not None:
@@ -118,7 +107,7 @@ class _Vx:
             if n.args.get('order'):    self.c['E_ORDER'] += 1
             if n.args.get('limit'):    self.c['E_LIMIT'] += 1
             if n.args.get('distinct'): self.c['H_DISTINCT'] += 1
-        if isinstance(n, exp.Window):      self.c['F_Window'] += 1
+        if isinstance(n, exp.Window):         self.c['F_Window'] += 1
         if isinstance(n, (exp.Union, exp.Intersect, exp.Except)): self.c['G_SetOp'] += 1
 
     def _mg(self, ch):
@@ -136,7 +125,6 @@ def cc(sq, dl='sqlite'):
 def fb(sc, bd):
     return "  ".join([f"Total={sc}"] + [f"{k}={bd[k]}" for k in CK if bd.get(k, 0) > 0])
 
-# ── 解析 ──
 
 def ps_sql(tx):
     if not tx: return None
@@ -179,7 +167,6 @@ def ex_tb(sq):
     for m in re.finditer(r'\bJOIN\s+(\w+)', sq, re.I): tb.add(m.group(1).lower())
     return tb
 
-# ── SQL执行 ──
 
 def rs(dp, sq, to=5):
     rv, er = [None], [None]
@@ -195,7 +182,6 @@ def rs(dp, sq, to=5):
     if t.is_alive() or er[0]: return None
     return rv[0]
 
-# ── Prompt模板 ──
 
 TP_CR = """\
 ### Complexity Scoring (sqlglot AST-based, each occurrence = +1)
@@ -207,27 +193,27 @@ TP_CR = """\
 | B_Arithmetic | Each +, -, *, /, %                                   |
 | B_CASE       | Each CASE expression                                 |
 | B_Predicate  | Each IN, BETWEEN, LIKE, EXISTS, IS                   |
-| C_GROUP      | GROUP BY present → +1                                |
-| C_HAVING     | HAVING present → +1                                  |
+| C_GROUP      | GROUP BY present -> +1                                |
+| C_HAVING     | HAVING present -> +1                                  |
 | D_Subquery   | Each subquery/CTE (+1 self, inner components recurse)|
-| E_ORDER      | ORDER BY present → +1                               |
-| E_LIMIT      | LIMIT present → +1                                   |
+| E_ORDER      | ORDER BY present -> +1                               |
+| E_LIMIT      | LIMIT present -> +1                                   |
 | F_Window     | Each OVER() window clause                            |
 | G_SetOp      | Each UNION / INTERSECT / EXCEPT                      |
 | H_DISTINCT   | Each SELECT DISTINCT                                 |
 
-TARGET: total complexity score must be {lo}–{hi}."""
+TARGET: total complexity score must be {lo}-{hi}."""
 
 TP_SY = """\
 You are a Senior SQLite query architect.
-Generate EXACTLY one SQL query with complexity {lo}–{hi}.
+Generate EXACTLY one SQL query with complexity {lo}-{hi}.
 
 {complexity_rules}
 
 ### Database Schema
 {schema_str}
 
-### Component Emphasis (randomly selected for diversity)
+### Component Emphasis (selected for diversity)
 The following components are selected for emphasis in this query.
 STEP 1: Evaluate whether each component below is naturally applicable
         to this database schema (consider table relationships, column types,
@@ -241,20 +227,20 @@ STEP 2: For each FEASIBLE component, incorporate it into your SQL.
 These tables/columns have been UNDEREXPLORED in existing queries.
 Build your query around them to discover overlooked data patterns:
   Underused tables: {underused_tables}
-Examine the schema above — focus on columns, relationships, and data
+Examine the schema above - focus on columns, relationships, and data
 that the reference examples below did NOT touch.
 
 ### Reference Examples
 {few_shot}
 
-### Output Format (strictly follow — NO [THOUGHT] tag needed)
+### Output Format (strictly follow - NO [THOUGHT] tag needed)
 [QUESTION-START] A natural-language question the SQL answers [QUESTION-END]
 [SQL-START] Your SQLite SQL here [SQL-END]
 """
 
 TP_RT = """\
-### RETRY — Attempt {attempt}/{max_attempts}
-Previous SQL complexity = {prev_score} (target: {lo}–{hi}).
+### RETRY - Attempt {attempt}/{max_attempts}
+Previous SQL complexity = {prev_score} (target: {lo}-{hi}).
 Breakdown: {breakdown}
 
 Diagnosis:
@@ -265,7 +251,7 @@ Diagnosis:
 ### Database Schema
 {schema_str}
 
-### Component Emphasis (randomly selected for diversity)
+### Component Emphasis (selected for diversity)
 {comp_guide}
 
 ### Schema Exploration (underused tables)
